@@ -8,6 +8,10 @@ import time
 import sys
 import threading
 import socket
+from enum import Enum, IntEnum
+from dataclasses import dataclass
+
+import setuptools
 from socketIO_client import SocketIO, LoggingNamespace
 from PIL import Image, ImageDraw, ImageFont
 from gpiozero import Button
@@ -34,6 +38,18 @@ _timer = None
 def set_pixels(u, row, r, g, b):
     for i in range(17):
         u.set_pixel(i, row, r, g, b)
+
+
+def get(d, key):
+    if key in d:
+        v = d[key]
+        if v is None:
+            return ""
+        elif type(v) == str:
+            return v
+        else:
+            return str(v)
+    return ""
 
 
 class Dots:
@@ -117,8 +133,22 @@ def seek():
             unicornhatmini.set_pixel(x, 6, 255, 0, 0)
 
 
+_seconds = 0
+
+
 def reSeek():
-    socketIO.emit('seek', seek_get_seconds())
+    global _seconds
+    seconds = int(time.time())
+    diff = int(seconds - _seconds)
+    print(diff)
+    if _seconds == 0:
+        _seconds = seconds
+    if diff > 1:
+        print("Do seek to current position " + str(diff))
+        socketIO.emit('seek', seek_get_seconds())
+        _seconds = seconds
+    else:
+        print("diff less than 1")
 
 
 class Text:
@@ -181,10 +211,112 @@ class Text:
         if self._timer.is_alive():
             print("thread cancel")
             self._timer.cancel()
+        time.sleep(0.2)
+
+
+class ModeEnum(IntEnum):
+    BitRate = 1
+    Position = 2
+    DetailFlow = 3
+    SysInfo = 4
+    Last = 5
+
+    def describe(self):
+        return self.name
+
+
+class Status:
+    def __init__(self, status):
+        self.s_service = get(status, 'service')
+        self.s_status = get(status, 'status')
+        self.s_artist = get(status, 'artist')
+        self.s_title = get(status, 'title')
+        self.s_bitdepth = get(status, 'bitdepth')
+        self.s_samplerate = get(status, 'samplerate')
+        self.s_position = get(status, 'position')
+        self.s_bitrate = get(status, 'bitrate')
+        if self.s_bitrate == "":
+            self.s_bitrate = getBitrate()
+        self.s_bitrate = self.s_bitrate.split(' ')[0]
+
+    @classmethod
+    def getStatus(self):
+        return requests.get('http://localhost:3000/api/v1/getState').json()
+
+    def dump(self, aStatus):
+        print(self.s_status, self.s_service, self.s_position, self.s_artist, self.s_title, self.s_bitrate,
+              self.s_samplerate, self.s_bitdepth)
+        print(aStatus)
+
+
+class Mode:
+    def __init__(self):
+        self._modeEnum = ModeEnum.BitRate
+        self._status = Status(Status.getStatus())
+
+    def cycle(self, aStatus):
+        self._status = aStatus
+        self._modeEnum = 1 + int(self._modeEnum)
+        if self._modeEnum == ModeEnum.Last:
+            self._modeEnum = 1
+        self.set(self._status)
+
+    def set(self, aStatus):
+        self._status = aStatus
+        if self._modeEnum == ModeEnum.BitRate:
+            self.setBitrate()
+        elif self._modeEnum == ModeEnum.Position:
+            self.setPosition()
+        elif self._modeEnum == ModeEnum.DetailFlow:
+            self.setDetailFlow()
+        elif self._modeEnum == ModeEnum.SysInfo:
+            self.setSysInfo()
+
+    def isA(self, enum):
+        return enum == self._modeEnum
+
+    def getValue(self):
+        return ModeEnum(self._modeEnum).describe()
+
+    def setBitrate(self):
+        _text.stop()
+        dotext(self._status.s_bitrate)
+        display_play(self._status.s_samplerate, self._status.s_bitdepth)
+        _dots.start()
+
+    def setDetailFlow(self):
+        _dots.stop()
+        _text.stop()
+        res = self._status.s_samplerate.split(' ')[0] + "/" + self._status.s_bitdepth.split(' ')[0]
+        if len(res) < 2:
+            res = " "
+        else:
+            res = " " + res + " "
+        _text.start(self._status.s_title +
+                    " by " + self._status.s_artist + res + getBitrate() + " bps " + self._status.s_service)
+
+    def setPosition(self):
+        _text.stop()
+        if self._status.s_service == "webradio":
+            dotext(self._status.s_title)
+        else:
+            dotext(self._status.s_position)
+            display_play(self._status.s_samplerate, self._status.s_bitdepth)
+            _dots.start()
+
+    def setSysInfo(self):
+        _text.stop()
+        _dots.stop()
+        _text.start(getNetworkIp())
+
+    def dump(self):
+        print("Mode :", self.getValue())
+        self._status.dump(Status.getStatus())
 
 
 _dots = Dots()
 _text = Text()
+_mode = Mode()
 
 
 def dotext(text):
@@ -255,17 +387,17 @@ def samplerate(unicornhatmini, samplerate):
         unicornhatmini.set_pixel(0, y, r, g, b)
         unicornhatmini.set_pixel(1, y, r, g, b)
         unicornhatmini.set_pixel(2, y, r, g, b)
-    if samplerate.find("193") != -1:
+    if samplerate.find("192") != -1:
         unicornhatmini.set_pixel(0, y, r, g, b)
         unicornhatmini.set_pixel(1, y, r, g, b)
         unicornhatmini.set_pixel(2, y, r, g, b)
         unicornhatmini.set_pixel(3, y, r, g, b)
     if samplerate.find("384") != -1:
-        unicornhatmini.set_pixel(0, y, 100, 100, 100)
-        unicornhatmini.set_pixel(1, y, 100, 100, 100)
-        unicornhatmini.set_pixel(2, y, 100, 100, 100)
-        unicornhatmini.set_pixel(3, y, 100, 100, 100)
-        unicornhatmini.set_pixel(4, y, 100, 100, 100)
+        g = 255
+        unicornhatmini.set_pixel(0, y, r, g, b)
+        unicornhatmini.set_pixel(1, y, r, g, b)
+        unicornhatmini.set_pixel(2, y, r, g, b)
+        unicornhatmini.set_pixel(3, y, r, g, b)
 
 
 def display_play(sr, bd):
@@ -286,16 +418,22 @@ def display_pause():
     unicornhatmini.set_pixel(16, 1, r, g, b)
     unicornhatmini.set_pixel(16, 2, r, g, b)
 
+
 def display_stop():
     r = 255
     g = 0
     b = 0
-    unicornhatmini.set_pixel(16, 1, r, g, b)
-    unicornhatmini.set_pixel(16, 2, r, g, b)
-    unicornhatmini.set_pixel(15, 1, r, g, b)
-    unicornhatmini.set_pixel(15, 2, r, g, b)
+    unicornhatmini.set_all(0,0,0)
 
-
+    unicornhatmini.set_pixel(6, 1, r, g, b)
+    unicornhatmini.set_pixel(7, 1, r, g, b)
+    unicornhatmini.set_pixel(8, 1, r, g, b)
+    unicornhatmini.set_pixel(6, 2, r, g, b)
+    unicornhatmini.set_pixel(7, 2, r, g, b)
+    unicornhatmini.set_pixel(8, 2, r, g, b)
+    unicornhatmini.set_pixel(6, 3, r, g, b)
+    unicornhatmini.set_pixel(7, 3, r, g, b)
+    unicornhatmini.set_pixel(8, 3, r, g, b)
 
 def getBitrate():
     global _block_messages
@@ -320,8 +458,8 @@ def getBitrate():
     print(bitrate)
     return bitrate.split(' ')[0]
 
+
 def pressed(button):
-    global timer2
     global splash_origin, splash_time
     global _mode
     button_name, x, y = button_map[button.pin.number]
@@ -330,68 +468,43 @@ def pressed(button):
     g = 255
     b = 0
     i = 0
-    global _debug
-    global _stop_flow
     _text.stop()
     command = ""
     if button_name == "X":
         print('button X')
         command = "toggle"
-        url = 'http://localhost:3000/api/v1/commands?cmd=toggle'
+        unicornhatmini.show()
     if button_name == "Y":
-        print('button Y')
-        jres = requests.get('http://localhost:3000/api/v1/getState').json()
-        if not _debug:
-            _debug = True
-            _dots.stop()
-            res = jres["samplerate"].split(' ')[0] + "/" + jres["bitdepth"].split(' ')[0]
-            if len(res) < 2:
-                res = " "
-            else:
-                res = " " + res + " "
-            _text.start(jres["title"] + " by " + jres["artist"] + res + getBitrate() + " bps ")
-        else:
-            _debug = False
-            if jres["service"] == "webradio":
-                title = jres["title"]
-                if len(title) > 4:
-                    _dots.stop()
-                    _text.start(jres["title"] + " " + getBitrate() + " bps")
-                else:
-                    dotext(jres["title"])
-            else:
-                _text.stop()
-                _dots.start()
-                dotext(str(jres["position"]))
-                display_play(jres["samplerate"], jres["bitdepth"])
+        _mode.cycle(Status(Status.getStatus()))
+        print('button Y new mode ' + _mode.getValue())
+        return
 
     if button_name == "A":
         print('button A')
-        if _debug:
-            _text.stop()
-            _text.start(getNetworkIp())
+        if Status.getStatus()["service"] == "webradio":
             return
-        jres = requests.get('http://localhost:3000/api/v1/getState').json()
-        if jres["service"] == "webradio":
-            return
+
         command = "prev"
-        url = 'http://localhost:3000/api/v1/commands?cmd=prev'
         unicornhatmini.set_pixel(0, 1, r, g, b)
         unicornhatmini.set_pixel(0, 2, r, g, b)
         unicornhatmini.set_pixel(1, 1, r, g, b)
         unicornhatmini.set_pixel(1, 2, r, g, b)
+        unicornhatmini.show()
     if button_name == "B":
         print('button B')
-        if jres["service"] == "webradio":
+        if _mode.isA(ModeEnum.SysInfo):
+                _mode.dump()
+                return
+        if Status.getStatus()["service"] == "webradio":
             return
+
         command = "next"
-        url = 'http://localhost:3000/api/v1/commands?cmd=next'
         unicornhatmini.set_pixel(0, 4, r, g, b)
         unicornhatmini.set_pixel(0, 5, r, g, b)
         unicornhatmini.set_pixel(1, 4, r, g, b)
         unicornhatmini.set_pixel(1, 5, r, g, b)
+        unicornhatmini.show()
 
-    unicornhatmini.show()
     socketIO.emit(command, '')
 
 
@@ -455,61 +568,31 @@ _block_messages = False
 
 def on_push_state(*args):
     global status
-    global title
-    global artist
-    global album
-    global albumart
     global _timer
     global _doDots
     global _debug
     global _dots
-    global _block_messages
-    global _stop_flow
-    print("message")
+    global _mode
 
-    if _block_messages:
-        _block_messages = False
-        return
+    status = Status(args[0])
+    print("Volumio message ", status.s_status)
 
-    status = args[0]['status'].encode('ascii', 'ignore')
-    title = str(args[0]['title'])  # .encode('ascii', 'ignore')
-    albumart = args[0]['albumart'].encode('ascii', 'ignore')
-    a_bitdepth = str(args[0]['bitdepth'])
-    a_samplerate = str(args[0]['samplerate'])
-    a_bitrate = None
-    if "bitrate" in args[0]:
-        a_bitrate = args[0]['bitrate']
-    if a_bitrate is None:
-        a_bitrate = getBitrate()
-    a_bitrate = a_bitrate.split(' ')[0]
-
-    a_position = str(args[0]['position'])
-    s_status = args[0]['status']
-    s_debug = args[0]
-    print(s_debug)
-
-
-    if s_status.find("stop") != -1:
+    if status.s_status.find("stop") != -1:
         unicornhatmini.set_all(0, 0, 0)
         _dots.stop()
         _text.stop()
-        #dotext(a_position)
         display_stop()
-    if s_status.find("pause") != -1:
+    if status.s_status.find("pause") != -1:
         _dots.pause()
         _text.stop()
-        #dotext(a_position)
-        display_pause()
-    if s_status.find("play") != -1:
-        #unicornhatmini.set_all(0, 0, 0)
-        _text.stop()
-        _dots.start()
-        if args[0]["service"] == "webradio":
-            dotext(title)
+        if _mode.isA(ModeEnum.BitRate):
+            dotext(getBitrate())
         else:
-            dotext(a_position)
-            print(args[0])
-            display_play(a_samplerate, a_bitdepth)
+            dotext(status.s_position)
+        display_pause()
+    if status.s_status.find("play") != -1:
+        # unicornhatmini.set_all(0, 0, 0)
+        _mode.set(status)
     unicornhatmini.show()
     return 'ok'
 
