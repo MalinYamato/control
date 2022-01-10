@@ -8,6 +8,7 @@ import time
 import sys
 import threading
 import socket
+import json
 from enum import Enum, IntEnum
 from dataclasses import dataclass
 
@@ -37,6 +38,9 @@ _bitrateTimer = None
 
 
 #################################################################
+
+
+
 
 def distance(x1, y1, x2, y2):
     return math.sqrt(((x2 - x1) ** 2) + ((y2 - y1) ** 2))
@@ -209,6 +213,36 @@ def reSeek():
 
 #################################################################################
 
+class Station:
+    def __init__(self, title, uri):
+        self.title = title
+        self.service = "webradio"
+        self.type = "webradio"
+        self.uri = uri
+
+class Playlist:
+    def __init__(self):
+        self.pos = 0
+        self.stations = []
+
+    def add(self, station):
+        self.stations.append(station)
+
+    def next(self):
+        self.pos = self.pos + 1
+        print("LEN",len(self.stations))
+        if self.pos > len( self.stations):
+            self.pos = 0
+        return self.stations[self.pos-1]
+
+
+_playlist = Playlist()
+
+_playlist.add(Station("P5", "https://sverigesradio.se/topsy/direkt/tunein/212-hi.mp3?DIST=TuneIn&TGT=TuneIn&maxServers=2&partnertok=eyJhbGciOiJIUzI1NiIsImtpZCI6InR1bmVpbiIsInR5cCI6IkpXVCJ9.eyJ0cnVzdGVkX3BhcnRuZXIiOnRydWUsImlhdCI6MTY0MTc2NTI3NiwiaXNzIjoidGlzcnYifQ.m2l8jqjoFX2G5fkHSDIueDfTzR-TytOqwSkmXBI_EHA")
+)
+
+_playlist.add(Station("P6", 'http://http-live.sr.se/p2musik-mp3-64')   )
+
 class Dots:
     def __init__(self):
         self.doDots = False
@@ -279,7 +313,7 @@ class Text:
         self.rainbow = False
 
     async def textFlow(self):
-        rotation = 0
+        rotation = 180
         if len(sys.argv) > 1:
             try:
                 rotation = int(sys.argv[1])
@@ -451,7 +485,7 @@ class Mode:
     def editPlaylist(self):
         _text.stop()
         _dots.stop()
-        dotext("+0-")
+        dotext("+O-")
 
     def dump(self):
         print("Mode :", self.getValue())
@@ -477,9 +511,19 @@ def updateBitrate():
 
 
 def dotext(text):
+
+    rotation = 180
+    if len(sys.argv) > 1:
+        try:
+            rotation = int(sys.argv[1])
+        except ValueError:
+            print("Usage: {} <rotation>".format(sys.argv[0]))
+            sys.exit(1)
+
     if text is None:
         print("a None value, returning")
         return False
+    unicornhatmini.set_rotation(rotation)
     display_width, display_height = unicornhatmini.get_shape()
     unicornhatmini.set_brightness(0.1)
     font = ImageFont.truetype("5x7.ttf", 8)
@@ -526,7 +570,8 @@ def pressed(button):
     b = 0
     i = 0
     _text.stop()
-    command = ""
+    cmd = ""
+    pars = ""
     if button_name == "X":
         print('button X')
         command = "toggle"
@@ -535,8 +580,14 @@ def pressed(button):
         print('button Y new mode ' + _mode.getValue())
         return
 
-    if button_name == "A":
+    elif button_name == "A":
         print('button A')
+        if _mode.isA(ModeEnum.SysInfo):
+            _dots.stop()
+            _text.rainbow = True
+            _text.start("Volumio is live at " + getNetworkIp() )
+            print(Status.getStatus())
+            return
         if _mode.isA(ModeEnum.EditPlayList):
             dotext("Add")
             return
@@ -548,31 +599,32 @@ def pressed(button):
             _text.start("Volumio is live at " + getNetworkIp() )
             return
 
-        command = "prev"
+        cmd = "prev"
         unicornhatmini.set_pixel(0, 1, r, g, b)
         unicornhatmini.set_pixel(0, 2, r, g, b)
         unicornhatmini.set_pixel(1, 1, r, g, b)
         unicornhatmini.set_pixel(1, 2, r, g, b)
         unicornhatmini.show()
-    if button_name == "B":
+    elif button_name == "B":
         print('button B')
+        cmd = "next"
+        print(Status.getStatus()["service"])
         if _mode.isA(ModeEnum.EditPlayList):
             dotext("Del")
             return
-        if Status.getStatus()["service"] == "webradio":
-            return
-        if Status.getStatus()["service"] == "webradio":
-            dotext("Del")
-            return
+        elif Status.getStatus()["service"] == "webradio" or  Status.getStatus()["service"] == "mpd":
+            station = _playlist.next()
+            pars = station.__dict__
+            cmd = "replaceAndPlay"
 
-        command = "next"
         unicornhatmini.set_pixel(0, 4, r, g, b)
         unicornhatmini.set_pixel(0, 5, r, g, b)
         unicornhatmini.set_pixel(1, 4, r, g, b)
         unicornhatmini.set_pixel(1, 5, r, g, b)
         unicornhatmini.show()
 
-    socketIO.emit(command, '')
+    print(cmd,pars)
+    socketIO.emit(cmd, pars)
 
 
 button_map = {5: ("A", 0, 0),  # Top Left
