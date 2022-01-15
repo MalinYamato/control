@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-import pickle
-import os
+
 import requests
 import asyncio
 import math
@@ -11,9 +10,14 @@ import threading
 import socket
 import json
 from enum import Enum, IntEnum
-from dataclasses import dataclass
 
-import setuptools
+import Text
+import PlayList
+from PlayList import Station
+import Dots
+
+from Dots import seek_get_seconds
+
 from socketIO_client import SocketIO, LoggingNamespace
 from PIL import Image, ImageDraw, ImageFont
 from gpiozero import Button
@@ -22,7 +26,7 @@ from colorsys import hsv_to_rgb
 
 unicornhatmini = UnicornHATMini()
 unicornhatmini.set_brightness(0.5)
-unicornhatmini.set_rotation(0)
+unicornhatmini.set_rotation(180)
 width, height = unicornhatmini.get_shape()
 
 splash_origin = (0, 0)
@@ -52,11 +56,6 @@ def getNetworkIp():
     return s.getsockname()[0]
 
 
-def set_pixels(u, row, r, g, b):
-    for i in range(17):
-        u.set_pixel(i, row, r, g, b)
-
-
 def get(d, key):
     if key in d:
         v = d[key]
@@ -81,6 +80,8 @@ def getBitrate():
         _block_messages = True
         reSeek()
         jres = requests.get('http://localhost:3000/api/v1/getState').json()
+        if "bitrate" not in jres:
+            return bitrate
         if jres["bitrate"] is None:
             print("No bitrate after second try!")
             bitrate = ""
@@ -174,26 +175,6 @@ def display_stop():
     unicornhatmini.show()
 
 
-def seek_get_seconds():
-    jres = requests.get('http://localhost:3000/api/v1/getState').json()
-    return int(jres["seek"] / 1000)
-
-
-def seek():
-    d = int(seek_get_seconds() / 15)
-    if d > 16:
-        set_pixels(unicornhatmini, 6, 255, 0, 0)
-        dd = d - 17
-        if dd > 16:
-            set_pixels(unicornhatmini, 6, 102, 0, 153)
-        else:
-            for p in range(dd):
-                unicornhatmini.set_pixel(p, 6, 102, 0, 153)
-    else:
-        for x in range(d):
-            unicornhatmini.set_pixel(x, 6, 255, 0, 0)
-
-
 _seconds = 0
 
 
@@ -201,215 +182,18 @@ def reSeek():
     global _seconds
     seconds = int(time.time())
     diff = int(seconds - _seconds)
-    print(diff)
     if _seconds == 0:
         _seconds = seconds
-    if diff > 1:
+    if diff > 2:
         print("Do seek to current position " + str(diff))
         socketIO.emit('seek', seek_get_seconds())
         _seconds = seconds
-    else:
-        print("diff less than 1")
-
 
 #################################################################################
 
-class Station:
-    def __init__(self, title, uri):
-        self.title = title
-        self.service = "webradio"
-        self.type = "webradio"
-        self.uri = uri
 
+_playlist = PlayList.Playlist()
 
-class Playlist:
-    def __init__(self):
-        self.pos = 0
-        self.stations = []
-        self.readFile()
-
-    def readFile(self):
-        if os.path.isfile("playlist.txt"):
-            with open('playlist.txt', 'rb') as file:
-                self.stations = pickle.load(file)
-        else:
-            self.writeFile()
-
-    def writeFile(self):
-        with open('playlist.txt', 'wb') as file:
-            pickle.dump(self.stations, file)
-
-    def add(self, station):
-        self.stations.append(station)
-
-    def addStatus(self, stat):
-        for i in range(len(self.stations)):
-            if stat["title"] == self.stations[i].title:
-                print("Playlist.add -- station alreaad added")
-                return
-        self.add(Station(stat["title"], stat["uri"]))
-        self.writeFile()
-
-    def delStatus(self, stat):
-        for i in range(len(self.stations)):
-            if stat["title"] == self.stations[i].title:
-                self.stations.pop(i)
-                self.writeFile()
-                return
-
-        print("Playlist.del -- station did not exist ")
-
-    def current(self):
-        return self.stations[self.pos ]
-
-    def next(self):
-        self.pos = self.pos + 1
-        if self.pos >= len(self.stations):
-            self.pos = 0
-        return self.stations[self.pos ]
-
-    def prev(self):
-        self.pos = self.pos - 1
-        if self.pos < 0:
-            self.pos = 0
-        return self.stations[self.pos]
-
-_playlist = Playlist()
-
-class Dots:
-    def __init__(self):
-        self.doDots = False
-        self.i = 0
-        self.timer = threading.Timer(1, self.run)
-
-    def reset(self):
-        self.i = 0
-
-    def stop(self):
-        self.i = 0
-        self.pause()
-        self.clear()
-
-    def pause(self):
-        self.doDots = False
-        self.timer.cancel()
-
-    def do(self):
-        return self.doDots
-
-    def add(self):
-        self.i = self.i + 1
-
-    def dots(self):
-        return self.i
-
-    def clear(self):
-        for p in range(8):
-            unicornhatmini.set_pixel(3 + p, 5, 0, 0, 0)
-
-    async def loop(self):
-        print("dot")
-        # seek()
-        self.doDots = True
-        while self.do():
-            self.add()
-            for p in range(self.dots()):
-                unicornhatmini.set_pixel(4 + p, 5, 255, 0, 0)
-            unicornhatmini.show()
-            if self.dots() > 8:
-                seek()
-                for p in range(self.dots()):
-                    unicornhatmini.set_pixel(4 + p, 5, 0, 0, 0)
-                self.reset()
-            await asyncio.sleep(1)
-
-    def run(self):
-        asyncio.run(_dots.loop())
-
-    def start(self):
-        seek()
-        if self.do():
-            print("Already running, issue stop to to run it again!")
-            return
-        if self.timer.is_alive():
-            self.timer.cancel()
-        self.timer = threading.Timer(0.1, self.run)
-        self.timer.start()
-
-
-class Text:
-    def __init__(self):
-        self.loops = -1
-        self._text = ""
-        self._timer = threading.Timer(1, self.looptext)
-        self._stop = True
-        self.rainbow = False
-
-    async def textFlow(self):
-        rotation = 180
-        if len(sys.argv) > 1:
-            try:
-                rotation = int(sys.argv[1])
-            except ValueError:
-                print("Usage: {} <rotation>".format(sys.argv[0]))
-                sys.exit(1)
-
-        unicornhatmini.set_rotation(rotation)
-        display_width, display_height = unicornhatmini.get_shape()
-        unicornhatmini.set_brightness(0.1)
-        font = ImageFont.truetype("5x7.ttf", 8)
-        text_width, text_height = font.getsize(self._text)
-        image = Image.new('P', (text_width + display_width + display_width, display_height), 0)
-        draw = ImageDraw.Draw(image)
-        draw.text((display_width, -1), self._text, font=font, fill=255)
-
-        offset_x = 0
-        loops = 1
-
-        while not self._stop:
-            if self.loops != -1 and loops >= self.loops:
-                self._stop = True
-            for y in range(display_height):
-                for x in range(display_width):
-                    hue = (time.time() / 10.0) + (x / float(display_width * 2))
-                    r, g, b = [int(c * 255) for c in hsv_to_rgb(hue, 1.0, 1.0)]
-                    if image.getpixel((x + offset_x, y)) == 255:
-                        if self.rainbow:
-                            unicornhatmini.set_pixel(x, y, r, g, b)
-                        else:
-                            unicornhatmini.set_pixel(x, y, 0, 100, 255)
-
-                    else:
-                        unicornhatmini.set_pixel(x, y, 0, 0, 0)
-
-            offset_x += 1
-            if offset_x + display_width > image.size[0]:
-                offset_x = 0
-
-            unicornhatmini.show()
-            await asyncio.sleep(0.10)
-            loops = loops + 1
-        self.loops = -1
-
-    def looptext(self):
-        asyncio.run(self.textFlow())
-
-    def start(self, text):
-        if self.stop is False:
-            print(" cannot start twice ")
-            return
-        self.stop()
-        self._text = text
-        self._timer = threading.Timer(0.1, self.looptext)
-        self._timer.start()
-        self._stop = False
-
-    def stop(self):
-        self._stop = True
-        if self._timer.is_alive():
-            print("thread cancel")
-            self._timer.cancel()
-        time.sleep(0.2)
 
 
 class ModeEnum(IntEnum):
@@ -428,6 +212,7 @@ class ModeEnum(IntEnum):
 
 class Status:
     def __init__(self, status):
+        self.raw = status
         self.s_service = get(status, 'service')
         self.s_status = get(status, 'status')
         self.s_artist = get(status, 'artist')
@@ -436,24 +221,33 @@ class Status:
         self.s_samplerate = get(status, 'samplerate')
         self.s_position = get(status, 'position')
         self.s_bitrate = get(status, 'bitrate')
+        self.s_trackType = get(status, 'trackType')
+        self.s_uri =  get(status, 'uri')
         if self.s_bitrate == "":
             self.s_bitrate = getBitrate()
         self.s_bitrate = self.s_bitrate.split(' ')[0]
 
     @classmethod
     def getStatus(self):
-        return requests.get('http://localhost:3000/api/v1/getState').json()
+        return Status(requests.get('http://localhost:3000/api/v1/getState').json())
 
-    def dump(self, aStatus):
+    def dump(self):
         print(self.s_status, self.s_service, self.s_position, self.s_artist, self.s_title, self.s_bitrate,
               self.s_samplerate, self.s_bitdepth)
-        print(aStatus)
+        print(self.raw)
 
+    def isFLAC(self):
+        raw = json.dumps( self.raw )
+        if raw.find("FLAC") != -1:
+            return True
+        if raw.find("flac") != -1:
+            return True
+        return False
 
 class Mode:
     def __init__(self):
         self._modeEnum = ModeEnum.Position
-        self._status = Status(Status.getStatus())
+        self._status = Status.getStatus()
 
     def cycle(self, aStatus):
         self._status = aStatus
@@ -493,11 +287,22 @@ class Mode:
     def isPrevNextMode(self):
         return self._modeEnum < 4
 
+    def setPosition(self):
+        if self._status.s_service == "webradio":
+            _text.dotext(self._status.s_title)
+        else:
+            _text.dotext(self._status.s_position)
+            _dots.start()
+            display_play(self._status)
+
     def setBitrate(self):
-        _text.stop()
-        dotext(self._status.s_bitrate)
-        display_play(self._status)
+        if self._status.isFLAC():
+            _text.dotext("FLAC")
+        else:
+            _text.dotext(self._status.s_bitrate)
         _dots.start()
+        display_play(self._status)
+
 
     def setDetailFlow(self):
         _dots.stop()
@@ -511,14 +316,6 @@ class Mode:
         _text.start(self._status.s_title +
                     " by " + self._status.s_artist + res + getBitrate() + " bps " + self._status.s_service)
 
-    def setPosition(self):
-        _text.stop()
-        if self._status.s_service == "webradio":
-            dotext(self._status.s_title)
-        else:
-            dotext(self._status.s_position)
-            display_play(self._status)
-            _dots.start()
 
     def setSysInfo(self):
         _text.stop()
@@ -530,23 +327,23 @@ class Mode:
         self._modeEnum = ModeEnum.EditPlayList
         _text.stop()
         _dots.stop()
-        dotext("+O-")
+        _text.dotext("+O-")
 
     def setWebradio(self):
         self._modeEnum = ModeEnum.Webradio
-        dotext(self._status.s_title)
+        _text.dotext(self._status.s_title)
 
     def dump(self):
         print("Mode :", self.getValue())
-        self._status.dump(Status.getStatus())
+        Status.getStatus().dump()
 
     @property
     def modeEnum(self):
         return self._modeEnum
 
 
-_dots = Dots()
-_text = Text()
+_dots = Dots.Dots(unicornhatmini)
+_text = Text.Text(unicornhatmini)
 _mode = Mode()
 
 _bitrate = ""
@@ -556,62 +353,20 @@ def updateBitrate():
     global _bitrate
     global _bitrateTimer
     if _mode.isA(ModeEnum.BitRate):
-        bitrate = getBitrate()
-        if bitrate != _bitrate:
-            _bitrate = bitrate
-            dotext(_bitrate)
-            seek()
+        stat = Status.getStatus()
+        if stat.isFLAC():
+            _text.dotext("FLAC")
+            _dots.start()
+            display_play(stat)
+        else:
+            bitrate = getBitrate()
+            print("not flack")
+            if bitrate != _bitrate:
+                _bitrate = bitrate
+                _dots.seek()
+                _text.dotext(_bitrate)
     _bitrateTimer = threading.Timer(10, updateBitrate)
     _bitrateTimer.start()
-
-
-def dotext(text):
-    rotation = 180
-    if len(sys.argv) > 1:
-        try:
-            rotation = int(sys.argv[1])
-        except ValueError:
-            print("Usage: {} <rotation>".format(sys.argv[0]))
-            sys.exit(1)
-
-    if text is None:
-        print("a None value, returning")
-        return False
-    unicornhatmini.set_rotation(rotation)
-    display_width, display_height = unicornhatmini.get_shape()
-    unicornhatmini.set_brightness(0.1)
-    font = ImageFont.truetype("5x7.ttf", 8)
-    text_width, text_height = font.getsize(text)
-    image = Image.new('P', (text_width + display_width + display_width, display_height), 0)
-    draw = ImageDraw.Draw(image)
-    draw.text((display_width, -1), text, font=font, fill=255)
-
-    offset_x = 17
-
-    text = text.split(' ')[0]
-
-    if len(text) == 1:
-        offset_x = 11
-    elif len(text) == 2:
-        offset_x = 13
-    elif len(text) == 3:
-        offset_x = 15
-
-    for y in range(display_height):
-        for x in range(display_width):
-            atime = 1640879509  # time.time())
-            hue = (atime / 10.0) + (1 / float(display_width * 2))
-            r, g, b = [int(c * 255) for c in hsv_to_rgb(hue, 1.0, 1.0)]
-            if image.getpixel((x + offset_x, y)) == 255:
-                unicornhatmini.set_pixel(x, y, 255, g, b)
-            else:
-                unicornhatmini.set_pixel(x, y, 0, 0, 0)
-
-    offset_x += 0
-    if offset_x + display_width > image.size[0]:
-        offset_x = 0
-
-    unicornhatmini.show()
 
 
 def pressed(button):
@@ -626,18 +381,16 @@ def pressed(button):
     command = ""
     params = ""
 
-    print(Status.getStatus())
-
     if button_name == "Y":
         print('button Y')
-        if _mode.isa(ModeEnum.EditPlayList):
+        if _mode.isA(ModeEnum.EditPlayList):
             _mode.setWebradio()
             return
         else:
             command = "toggle"
 
     if button_name == "X":
-        _mode.cycle(Status(Status.getStatus()))
+        _mode.cycle(Status.getStatus())
         print('button X new mode ' + _mode.getValue())
         return
 
@@ -652,9 +405,9 @@ def pressed(button):
         elif _mode.isA(ModeEnum.EditPlayList):
             print("aaa")
             _playlist.addStatus(Status.getStatus())
-            dotext("add")
+            _text.dotext("add")
             return
-        elif _mode.isA(ModeEnum.Webradio) or Status.getStatus()["service"] == "webradio" or Status.getStatus()["service"] == "mpd":
+        elif _mode.isA(ModeEnum.Webradio) or Status.getStatus().s_service == "webradio" or Status.getStatus().s_service == "mpd":
             print("cc")
             _mode.editPlaylist()
             return
@@ -672,18 +425,19 @@ def pressed(button):
         unicornhatmini.show()
     elif button_name == "A":
         print('button A')
-
-        print(Status.getStatus()["service"])
+        print(_mode.getValue())
+        print(Status.getStatus().s_status)
         if _mode.isA(ModeEnum.EditPlayList):
             _playlist.delStatus(Status.getStatus())
-            dotext("del")
+            _text.dotext("del")
             return
-        elif _mode.isA(ModeEnum.Webradio) or Status.getStatus()["service"] == "webradio" or Status.getStatus()["service"] == "mpd":
+        elif _mode.isA(ModeEnum.Webradio) or Status.getStatus().s_service== "webradio" or Status.getStatus().s_service == "mpd":
             station = _playlist.next()
             params = station.__dict__
             command = "replaceAndPlay"
-        elif _mode.isa(ModeEnum.EditPlayList):
+        elif _mode.isA(ModeEnum.EditPlayList):
             _playlist.delStatus(Status.getStatus())
+            return
         else:
             command = "next"
 
@@ -747,6 +501,7 @@ def on_push_state(*args):
 
     status = Status(args[0])
     print("Volumio message ", status.s_status)
+    Status.getStatus().dump()
 
     if status.s_status.find("stop") != -1:
         unicornhatmini.set_all(0, 0, 0)
@@ -758,7 +513,14 @@ def on_push_state(*args):
         display_pause()
         _dots.pause()
     if status.s_status.find("play") != -1:
-        _mode.set(status)
+        if status.s_trackType == "airplay":
+            _text.stop()
+            _text.dotext("Air")
+        elif status.s_title == "live Audio":
+            _text.stop()
+            _text.dotext("Live")
+        else:
+            _mode.set(status)
 
     return 'ok'
 
