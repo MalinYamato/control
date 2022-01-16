@@ -7,14 +7,26 @@ import threading
 from PIL import Image, ImageDraw, ImageFont
 from colorsys import hsv_to_rgb
 
+class RGB:
+    def __init__(self, r, g, b):
+        self.r = r
+        self.g = g
+        self.b = b
+    @classmethod
+    def getDefault(self):
+        return RGB(0,184,230)
+
 class Text:
     def __init__(self, u):
+        self.rgb = RGB(0,0,0)
+        self.brightness = 0.05
         self.unicorn = u
         self.loops = -1
         self._text = ""
         self._timer = threading.Timer(1, self.looptext)
         self._stop = True
         self.rainbow = False
+
 
     async def textFlow(self):
         rotation = 180
@@ -27,7 +39,7 @@ class Text:
 
         self.unicorn.set_rotation(rotation)
         display_width, display_height = self.unicorn.get_shape()
-        self.unicorn.set_brightness(0.1)
+        self.unicorn.set_brightness(self.brightness)
         font = ImageFont.truetype("5x7.ttf", 8)
         text_width, text_height = font.getsize(self._text)
         image = Image.new('P', (text_width + display_width + display_width, display_height), 0)
@@ -82,7 +94,8 @@ class Text:
             self._timer.cancel()
         time.sleep(0.2)
 
-    def dotext(self, text):
+    def dotext(self, text, rgb=RGB.getDefault() ):
+        self.rgb = rgb
         self.stop()
         rotation = 180
         if len(sys.argv) > 1:
@@ -97,7 +110,7 @@ class Text:
             return False
         self.unicorn.set_rotation(rotation)
         display_width, display_height = self.unicorn.get_shape()
-        self.unicorn.set_brightness(0.1)
+        self.unicorn.set_brightness(self.brightness)
         font = ImageFont.truetype("5x7.ttf", 8)
         text_width, text_height = font.getsize(text)
         image = Image.new('P', (text_width + display_width + display_width, display_height), 0)
@@ -117,11 +130,8 @@ class Text:
 
         for y in range(display_height):
             for x in range(display_width):
-                atime = 1640879509  # time.time())
-                hue = (atime / 10.0) + (1 / float(display_width * 2))
-                r, g, b = [int(c * 255) for c in hsv_to_rgb(hue, 1.0, 1.0)]
                 if image.getpixel((x + offset_x, y)) == 255:
-                    self.unicorn.set_pixel(x, y, 255, g, b)
+                    self.unicorn.set_pixel(x, y, self.rgb.r, self.rgb.g, self.rgb.b)
                 else:
                     self.unicorn.set_pixel(x, y, 0, 0, 0)
 

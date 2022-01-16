@@ -9,7 +9,15 @@ def set_pixels(u, row, r, g, b):
 
 def seek_get_seconds():
     jres = requests.get('http://localhost:3000/api/v1/getState').json()
-    return int(jres["seek"] / 1000)
+    print(jres)
+    if "seek" in jres:
+        seek = jres["seek"]
+        if seek is not None:
+            return int(jres["seek"] / 1000)
+        else:
+            return 0
+    else:
+        return 0
 
 class Dots:
     def __init__(self, u):

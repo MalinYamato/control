@@ -1,5 +1,36 @@
 #!/usr/bin/env python3
 
+#// Copyright 2017 Malin Yamato --  All rights reserved.
+#// https://github.com/MalinYamato
+#//
+#// MIT License
+#// Redistribution and use in source and binary forms, with or without
+#// modification, are permitted provided that the following conditions are
+#// met:
+#//
+#//     * Redistributions of source code must retain the above copyright
+#// notice, this list of conditions and the following disclaimer.
+#//     * Redistributions in binary form must reproduce the above
+#// copyright notice, this list of conditions and the following disclaimer
+#// in the documentation and/or other materials provided with the
+#// distribution.
+#//     * Neither the name of Rakuen. nor the names of its
+#// contributors may be used to endorse or promote products derived from
+#// this software without specific prior written permission.
+#//
+#// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+#// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+#// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+#// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+#// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+#// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+#// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+#// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+#// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+#// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
 import requests
 import asyncio
 import math
@@ -12,6 +43,7 @@ import json
 from enum import Enum, IntEnum
 
 import Text
+from Text import RGB
 import PlayList
 from PlayList import Station
 import Dots
@@ -41,10 +73,6 @@ _doDots = False
 _timer = None
 _bitrateTimer = None
 
-
-#################################################################
-
-
 def distance(x1, y1, x2, y2):
     return math.sqrt(((x2 - x1) ** 2) + ((y2 - y1) ** 2))
 
@@ -55,6 +83,30 @@ def getNetworkIp():
     s.connect(('<broadcast>', 0))
     return s.getsockname()[0]
 
+def airplayDrawing():
+    global unicornhatmini
+    u = unicornhatmini
+    r = 0
+    g = 184
+    b = 230
+    xo = 3
+    xd = 10
+    u.set_all(0,0,0)
+    u.set_brightness(0.05)
+    for x in range(xd):
+        u.set_pixel(xo + x, 1, r, g, b)
+    for y in range(4):
+        u.set_pixel(xo, y+1, r, g, b)
+    for y in range(4):
+        u.set_pixel(xo+xd, y+1, r, g, b)
+    u.set_pixel(xo + 1, 4, r, g, b)
+    u.set_pixel(xo + xd-1, 4, r, g, b)
+    for x in range(5):
+        u.set_pixel(xo + 3 + x, 5, r, g, b)
+    for x in range(3):
+        u.set_pixel(xo + 4 + x, 4, r, g, b)
+    u.set_pixel(xo + 5, 3, r, g, b)
+    u.show()
 
 def get(d, key):
     if key in d:
@@ -189,8 +241,6 @@ def reSeek():
         socketIO.emit('seek', seek_get_seconds())
         _seconds = seconds
 
-#################################################################################
-
 
 _playlist = PlayList.Playlist()
 
@@ -244,6 +294,13 @@ class Status:
             return True
         return False
 
+    def isDLNA(self):
+        raw = json.dumps(self.raw)
+        return raw.find("AirMusic") != -1
+
+    def isAirPlay(self):
+        return self.s_trackType == "airplay"
+
 class Mode:
     def __init__(self):
         self._modeEnum = ModeEnum.Position
@@ -258,8 +315,11 @@ class Mode:
 
     def set(self, aStatus):
         self._status = aStatus
+        if self._status.s_trackType == "airplay" and self._modeEnum != ModeEnum.SysInfo and self._modeEnum != ModeEnum.Webradio:
+            airplayDrawing()
+            return
         if (self._status.s_status == "stop" or self._status.s_status == "") and self._modeEnum != ModeEnum.SysInfo:
-            dotext("M" + str(self._modeEnum))
+            _text.dotext("M" + str(self._modeEnum))
             return
         elif self._modeEnum == ModeEnum.Position :
             self.setPosition()
@@ -354,19 +414,20 @@ def updateBitrate():
     global _bitrateTimer
     if _mode.isA(ModeEnum.BitRate):
         stat = Status.getStatus()
-        if stat.isFLAC():
-            _text.dotext("FLAC")
-            _dots.start()
-            display_play(stat)
-        else:
-            bitrate = getBitrate()
-            print("not flack")
-            if bitrate != _bitrate:
-                _bitrate = bitrate
-                _dots.seek()
-                _text.dotext(_bitrate)
-    _bitrateTimer = threading.Timer(10, updateBitrate)
-    _bitrateTimer.start()
+        if stat.s_status != "pause" and stat.s_status != "stop" and not stat.isDLNA() and not stat.isAirPlay():
+            if stat.isFLAC():
+                _text.dotext("FLAC")
+                _dots.start()
+                display_play(stat)
+            else:
+                bitrate = getBitrate()
+                print("not flack")
+                if bitrate != _bitrate:
+                    _bitrate = bitrate
+                    _dots.seek()
+                    _text.dotext(_bitrate)
+        _bitrateTimer = threading.Timer(10, updateBitrate)
+        _bitrateTimer.start()
 
 
 def pressed(button):
@@ -403,18 +464,10 @@ def pressed(button):
             print(Status.getStatus())
             return
         elif _mode.isA(ModeEnum.EditPlayList):
-            print("aaa")
             _playlist.addStatus(Status.getStatus())
-            _text.dotext("add")
             return
         elif _mode.isA(ModeEnum.Webradio) or Status.getStatus().s_service == "webradio" or Status.getStatus().s_service == "mpd":
-            print("cc")
             _mode.editPlaylist()
-            return
-        elif _mode.isA(ModeEnum.SysInfo):
-            _dots.stop()
-            _text.rainbow = True
-            _text.start("Volumio is live at " + getNetworkIp())
             return
         else:
             command = "prev"
@@ -513,12 +566,12 @@ def on_push_state(*args):
         display_pause()
         _dots.pause()
     if status.s_status.find("play") != -1:
-        if status.s_trackType == "airplay":
+        if status.isAirPlay():
             _text.stop()
-            _text.dotext("Air")
-        elif status.s_title == "live Audio":
+            airplayDrawing()
+        elif status.isDLNA():
             _text.stop()
-            _text.dotext("Live")
+            _text.dotext("dlna",RGB(0,255,0) )
         else:
             _mode.set(status)
 
@@ -539,7 +592,6 @@ async def main():
         _text.rainbow = True
         _dots.stop()
         _text.start("Volumio is live!")
-
         _bitrateTimer = threading.Timer(10, updateBitrate)
         _bitrateTimer.start()
 
