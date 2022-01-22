@@ -6,26 +6,20 @@ import sys
 import threading
 from PIL import Image, ImageDraw, ImageFont
 from colorsys import hsv_to_rgb
-
-class RGB:
-    def __init__(self, r, g, b):
-        self.r = r
-        self.g = g
-        self.b = b
-    @classmethod
-    def getDefault(self):
-        return RGB(0,184,230)
+from Settings import Settings
+from Draw import RGB
 
 class Text:
-    def __init__(self, u):
+    def __init__(self, u, s : Settings ):
         self.rgb = RGB(0,0,0)
-        self.brightness = 0.05
+        self.brightness = s.get_brightness()
         self.unicorn = u
         self.loops = -1
         self._text = ""
         self._timer = threading.Timer(1, self.looptext)
         self._stop = True
         self.rainbow = False
+        print(self.brightness)
 
 
     async def textFlow(self):
