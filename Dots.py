@@ -4,10 +4,11 @@ import asyncio
 import threading
 from Settings import Settings
 from Util import *
+from Color import RGB
 
-def set_pixels(u, row, r, g, b):
+def set_pixels(u, row, rgb):
     for i in range(17):
-        u.set_pixel(i, row, r, g, b)
+        u.set_pixel(i, row, rgb.r, rgb.g, rgb.b)
 
 class Dots:
     def __init__(self, u, s: Settings):
@@ -15,7 +16,11 @@ class Dots:
         self._unicorn = u
         self.doDots = False
         self.i = 0
+        self._settings = s
         self.timer = threading.Timer(1, self.run)
+
+    def set_pixel(self,x, y, rgb: RGB):
+        self._unicorn.set_pixel(x, y, rgb.r, rgb.g, rgb.b)
 
     def reset(self):
         self.i = 0
@@ -40,7 +45,7 @@ class Dots:
 
     def clear(self):
         for p in range(8):
-            self._unicorn.set_pixel(3 + p, 5, 0, 0, 0)
+            self.set_pixel(3 + p, 5, RGB())
 
     async def loop(self):
         print("dot")
@@ -49,12 +54,12 @@ class Dots:
         while self.do():
             self.add()
             for p in range(self.dots()):
-                self._unicorn.set_pixel(4 + p, 5, 255, 0, 0)
+                self.set_pixel(5 + p, 5, self._settings.get_dotColor())
             self._unicorn.show()
-            if self.dots() > 8:
+            if self.dots() > 6:
                 self.seek()
                 for p in range(self.dots()):
-                    self._unicorn.set_pixel(4 + p, 5, 0, 0, 0)
+                    self.set_pixel(5 + p, 5, RGB())
                 self.reset()
             await asyncio.sleep(1)
 
@@ -74,13 +79,14 @@ class Dots:
     def seek(self):
         d = int(seek_get_seconds() / 15)
         if d > 16:
-            set_pixels(self._unicorn, 6, 255, 0, 0)
+            set_pixels(self._unicorn, 6, self._settings.get_dotColor())
             dd = d - 17
             if dd > 16:
-                set_pixels(self._unicorn, 6, 102, 0, 153)
+                set_pixels(self._unicorn, 6, RGB(102, 0, 153))
             else:
                 for p in range(dd):
-                    self._unicorn.set_pixel(p, 6, 102, 0, 153)
+                    self.set_pixel(p, 6, RGB(102, 0, 153))
         else:
             for x in range(d):
-                self._unicorn.set_pixel(x, 6, 255, 0, 0)
+                rgb = self._settings.get_dotColor()
+                self.set_pixel(x, 6, rgb )

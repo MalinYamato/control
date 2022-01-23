@@ -29,7 +29,7 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+import time
 
 import requests
 import asyncio
@@ -51,6 +51,7 @@ from unicornhatmini import UnicornHATMini
 from Status import *
 from Draw import *
 from Util import *
+
 
 def getNetworkIp():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -76,7 +77,6 @@ class ModeEnum(IntEnum):
     SysInfo = 5
     Last = 6
     EditPlayList = 7
-
 
     def describe(self):
         return self.name
@@ -109,6 +109,9 @@ class Mode:
             self._modeEnum = 1
         if self._modeEnum != ModeEnum.SysInfo:
             self._sysMode = SystemMode.Off
+        if self._modeEnum == ModeEnum.Webradio:
+            _draw.radio()
+            return
         self.set(self._status)
 
     def set(self, aStatus):
@@ -119,7 +122,7 @@ class Mode:
         if (self._status.s_status == "stop" or self._status.s_status == "") and self._modeEnum != ModeEnum.SysInfo:
             _text.dotext("M" + str(self._modeEnum))
             return
-        elif self._modeEnum == ModeEnum.Position :
+        elif self._modeEnum == ModeEnum.Position:
             self.setPosition()
         if self._modeEnum == ModeEnum.BitRate:
             self.setBitrate()
@@ -162,9 +165,7 @@ class Mode:
             _text.dotext("FLAC")
         else:
             _text.dotext(self._status.s_bitrate)
-        _dots.start()
         _draw.display_play(self._status)
-
 
     def setDetailFlow(self):
         _dots.stop()
@@ -178,13 +179,11 @@ class Mode:
         _text.start(self._status.s_title +
                     " by " + self._status.s_artist + res + getBitrate(socketIO) + " bps " + self._status.s_service)
 
-
     def setSysInfo(self):
         _text.stop()
         _dots.stop()
         _text.rainbow = False
         _text.dotext("sys")
-
 
     def editPlaylist(self):
         self._modeEnum = ModeEnum.EditPlayList
@@ -193,6 +192,7 @@ class Mode:
         _text.dotext("+O-")
 
     def setWebradio(self):
+        _dots.stop()
         self._modeEnum = ModeEnum.Webradio
         _text.dotext(self._status.s_title)
 
@@ -220,6 +220,8 @@ _draw = Draw(unicornhatmini, _settings)
 _mode = Mode()
 
 _bitrate = ""
+
+
 def updateBitrate():
     global _bitrate
     global _bitrateTimer
@@ -228,8 +230,7 @@ def updateBitrate():
         if stat.s_status != "pause" and stat.s_status != "stop" and not stat.isDLNA() and not stat.isAirPlay():
             if stat.isFLAC():
                 _text.dotext("FLAC")
-                _dots.start()
-                _draw.display_play(stat)
+                # _dots.start()
             else:
                 bitrate = getBitrate(socketIO)
                 print("not flack")
@@ -237,6 +238,7 @@ def updateBitrate():
                     _bitrate = bitrate
                     _dots.seek()
                     _text.dotext(_bitrate)
+            _draw.display_play(stat)
         _bitrateTimer = threading.Timer(10, updateBitrate)
         _bitrateTimer.start()
 
@@ -273,7 +275,6 @@ def pressed(button):
         if _mode.isA(ModeEnum.SysInfo) and _mode.isA(SystemMode.brightness):
             _settings.increaes()
             unicornhatmini.set_brightness(_settings.get_brightness())
-            print(_settings.get_brightness())
             return
         elif _mode.isA(SystemMode.flash):
             unicornhatmini.set_brightness(_settings.get_brightness())
@@ -282,12 +283,12 @@ def pressed(button):
             _dots.stop()
             _text.rainbow = True
             _text.start("Volumio is live at " + getNetworkIp())
-            print(Status.getStatus())
             return
         elif _mode.isA(ModeEnum.EditPlayList):
             _playlist.addStatus(Status.getStatus())
             return
-        elif _mode.isA(ModeEnum.Webradio) or Status.getStatus().s_service == "webradio" or Status.getStatus().s_service == "mpd":
+        elif _mode.isA(
+                ModeEnum.Webradio) or Status.getStatus().s_service == "webradio" or Status.getStatus().s_service == "mpd":
             _mode.editPlaylist()
             return
         else:
@@ -298,22 +299,20 @@ def pressed(button):
         unicornhatmini.set_pixel(1, 2, r, g, b)
         unicornhatmini.show()
     elif button_name == "A":
+        print('button A')
         if _mode.isA(ModeEnum.SysInfo) and _mode.isA(SystemMode.brightness):
             _settings.decrease()
             unicornhatmini.set_brightness(_settings.get_brightness())
-            print(_settings.get_brightness())
             return
         elif _mode.isA(ModeEnum.SysInfo) and _mode.isA(SystemMode.flash):
             unicornhatmini.set_brightness(1.0)
             return
-        print('button A')
-        print(_mode.getValue())
-        print(Status.getStatus().s_status)
         if _mode.isA(ModeEnum.EditPlayList):
             _playlist.delStatus(Status.getStatus())
             _text.dotext("del")
             return
-        elif _mode.isA(ModeEnum.Webradio) or Status.getStatus().s_service== "webradio" or Status.getStatus().s_service == "mpd":
+        elif _mode.isA(
+                ModeEnum.Webradio) or Status.getStatus().s_service == "webradio" or Status.getStatus().s_service == "mpd":
             station = _playlist.next()
             params = station.__dict__
             command = "replaceAndPlay"
@@ -398,7 +397,7 @@ def on_push_state(*args):
             _draw.airplayDrawing()
         elif status.isDLNA():
             _text.stop()
-            _text.dotext("dlna",RGB(0,255,0) )
+            _text.dotext("dlna", RGB(0, 255, 0))
         else:
             _mode.set(status)
 
@@ -418,6 +417,10 @@ async def main():
         time.sleep(2)
         _text.rainbow = True
         _dots.stop()
+
+        _draw.radio()
+        time.sleep(10)
+
         _text.start("Volumio is live!")
         _bitrateTimer = threading.Timer(10, updateBitrate)
         _bitrateTimer.start()

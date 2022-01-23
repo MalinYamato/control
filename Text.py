@@ -7,19 +7,23 @@ import threading
 from PIL import Image, ImageDraw, ImageFont
 from colorsys import hsv_to_rgb
 from Settings import Settings
-from Draw import RGB
+from Color import RGB
 
 class Text:
     def __init__(self, u, s : Settings ):
         self.rgb = RGB(0,0,0)
-        self.brightness = s.get_brightness()
+        self.settings = s
         self.unicorn = u
         self.loops = -1
         self._text = ""
         self._timer = threading.Timer(1, self.looptext)
         self._stop = True
         self.rainbow = False
-        print(self.brightness)
+        print(self.settings.get_brightness())
+
+
+    def set_pixel(self,x,y, rgb : RGB):
+        self.unicorn.set_pixel(x,y, rgb.r, rgb.g, rgb.b)
 
 
     async def textFlow(self):
@@ -33,7 +37,7 @@ class Text:
 
         self.unicorn.set_rotation(rotation)
         display_width, display_height = self.unicorn.get_shape()
-        self.unicorn.set_brightness(self.brightness)
+        self.unicorn.set_brightness(self.settings.get_brightness())
         font = ImageFont.truetype("5x7.ttf", 8)
         text_width, text_height = font.getsize(self._text)
         image = Image.new('P', (text_width + display_width + display_width, display_height), 0)
@@ -52,12 +56,11 @@ class Text:
                     r, g, b = [int(c * 255) for c in hsv_to_rgb(hue, 1.0, 1.0)]
                     if image.getpixel((x + offset_x, y)) == 255:
                         if self.rainbow:
-                            self.unicorn.set_pixel(x, y, r, g, b)
+                            self.set_pixel(x, y, RGB(r, g, b))
                         else:
-                            self.unicorn.set_pixel(x, y, 0, 100, 255)
-
+                            self.set_pixel(x, y, self.settings.get_textColor())
                     else:
-                        self.unicorn.set_pixel(x, y, 0, 0, 0)
+                        self.set_pixel(x, y, RGB())
 
             offset_x += 1
             if offset_x + display_width > image.size[0]:
@@ -88,7 +91,7 @@ class Text:
             self._timer.cancel()
         time.sleep(0.2)
 
-    def dotext(self, text, rgb=RGB.getDefault() ):
+    def dotext(self, text, rgb = RGB.getDefault()):
         self.rgb = rgb
         self.stop()
         rotation = 180
@@ -104,7 +107,7 @@ class Text:
             return False
         self.unicorn.set_rotation(rotation)
         display_width, display_height = self.unicorn.get_shape()
-        self.unicorn.set_brightness(self.brightness)
+        self.unicorn.set_brightness(self.settings.get_brightness())
         font = ImageFont.truetype("5x7.ttf", 8)
         text_width, text_height = font.getsize(text)
         image = Image.new('P', (text_width + display_width + display_width, display_height), 0)
@@ -125,9 +128,9 @@ class Text:
         for y in range(display_height):
             for x in range(display_width):
                 if image.getpixel((x + offset_x, y)) == 255:
-                    self.unicorn.set_pixel(x, y, self.rgb.r, self.rgb.g, self.rgb.b)
+                    self.set_pixel(x, y, self.settings.get_textColor())
                 else:
-                    self.unicorn.set_pixel(x, y, 0, 0, 0)
+                    self.set_pixel(x, y, RGB())
 
         offset_x += 0
         if offset_x + display_width > image.size[0]:
